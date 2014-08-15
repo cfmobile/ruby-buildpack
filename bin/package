@@ -45,6 +45,7 @@ dependencies=(
   'http://heroku-jdk.s3.amazonaws.com/openjdk1.7.0_25.tar.gz'
   'http://heroku-jdk.s3.amazonaws.com/openjdk1.7.0_45.tar.gz'
   'http://heroku-jdk.s3.amazonaws.com/openjdk7-latest.tar.gz'
+  'http://dl.google.com/android/android-sdk_r22.3-linux.tgz'
 )
 
 excluded_files=(

@@ -17,4 +17,9 @@ LanguagePack::Instrument.trace 'compile', 'app.compile' do
       pack.compile
     end
   end
+
+  sdk_pack = LanguagePack::AndroidSdk.new ARGV[0], ARGV[1]
+  sdk_pack.log("compile") do
+    sdk_pack.compile
+  end
 end
