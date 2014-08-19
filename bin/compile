@@ -1,25 +1,108 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env bash
 
-# sync output
-$stdout.sync = true
+# fail fast
+set -e
 
-$:.unshift File.expand_path("../../lib", __FILE__)
-require "language_pack"
-require "language_pack/shell_helpers"
+# debug
+# set -x
 
-require 'cloud_foundry/language_pack/extensions'
+# /home/ubuntu/lib
+# /home/ubuntu/ruby-buildpack/lib
 
-LanguagePack::Instrument.trace 'compile', 'app.compile' do
-  if pack = LanguagePack.detect(ARGV[0], ARGV[1])
-    LanguagePack::ShellHelpers.initialize_env(ARGV[2])
-    pack.topic("Compiling #{pack.name}")
-    pack.log("compile") do
-      pack.compile
+# parse and derive params
+BUILD_DIR=$1
+CACHE_DIR=$2
+
+LP_DIR=`cd $(dirname $0); cd ..; pwd`
+
+function run_language_pack() {
+/usr/bin/env ruby <<-EORUBY
+  # sync output
+  \$stdout.sync = true
+  \$:.unshift File.expand_path(File.join("$LP_DIR", "/lib"))
+
+  require "language_pack"
+  require "language_pack/shell_helpers"
+  require 'cloud_foundry/language_pack/extensions'
+
+  LanguagePack::Instrument.trace 'compile', 'app.compile' do
+    if pack = LanguagePack.detect("$BUILD_DIR", "$CACHE_DIR")
+      LanguagePack::ShellHelpers.initialize_env("$3")
+      pack.topic("Compiling #{pack.name}")
+      pack.log("compile") do
+        pack.compile
+      end
+    end
+
+    sdk_pack = LanguagePack::AndroidSdk.new "$BUILD_DIR", "$CACHE_DIR"
+    sdk_pack.log("compile") do
+      sdk_pack.compile
     end
   end
+EORUBY
+}
 
-  sdk_pack = LanguagePack::AndroidSdk.new ARGV[0], ARGV[1]
-  sdk_pack.log("compile") do
-    sdk_pack.compile
-  end
-end
+function error() {
+  echo " !     $*" >&2
+  exit 1
+}
+
+function topic() {
+  echo "-----> $*"
+}
+
+function indent() {
+  c='s/^/       /'
+  case $(uname) in
+    Darwin) sed -l "$c";;
+    *)      sed -u "$c";;
+  esac
+}
+
+
+run_language_pack
+
+
+APT_CACHE_DIR="$CACHE_DIR/apt/cache"
+APT_STATE_DIR="$CACHE_DIR/apt/state"
+
+mkdir -p "$APT_CACHE_DIR/archives/partial"
+mkdir -p "$APT_STATE_DIR/lists/partial"
+
+APT_OPTIONS="-o debug::nolocking=true -o dir::cache=$APT_CACHE_DIR -o dir::state=$APT_STATE_DIR"
+
+if [[ ! -f $BUILD_DIR/Aptfile ]]; then
+  topic "Skipping 'apt-get install' as there is no Aptfile"
+else
+  topic "Updating apt caches"
+  apt-get $APT_OPTIONS update | indent
+
+  for PACKAGE in $(cat $BUILD_DIR/Aptfile); do
+    topic "Fetching .debs for $PACKAGE"
+    apt-get $APT_OPTIONS -y -d install $PACKAGE | indent
+  done
+
+  mkdir -p $BUILD_DIR/.apt
+
+  for DEB in $(ls -1 $APT_CACHE_DIR/archives/*.deb); do
+    topic "Installing $(basename $DEB)"
+    dpkg -x $DEB $BUILD_DIR/.apt/
+  done
+
+  topic "Writing profile script"
+  mkdir -p $BUILD_DIR/.profile.d
+cat <<EOF >$BUILD_DIR/.profile.d/000_apt.sh
+export PATH="\$HOME/.apt/usr/bin:$PATH"
+export LD_LIBRARY_PATH="\$HOME/.apt/usr/lib:\$LD_LIBRARY_PATH"
+export INCLUDE_PATH="\$HOME/.apt/usr/include:\$INCLUDE_PATH"
+export CPATH="\$INCLUDE_PATH"
+export CPPPATH="\$INCLUDE_PATH"
+EOF
+
+  export PATH="$BUILD_DIR/.apt/usr/bin:$PATH"
+  export LD_LIBRARY_PATH="$BUILD_DIR/.apt/usr/lib:$LD_LIBRARY_PATH"
+  export INCLUDE_PATH="$BUILD_DIR/.apt/usr/include:$INCLUDE_PATH"
+  export CPATH="$INCLUDE_PATH"
+  export CPPPATH="$INCLUDE_PATH"
+fi
+

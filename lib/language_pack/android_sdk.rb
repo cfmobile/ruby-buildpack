@@ -37,15 +37,31 @@ private
       set_env_default  "ANDROID_HOME", android_home_path
       set_env_override "PATH", "#{android_home_path}/tools:#{android_home_path}/platform-tools:#{android_home_path}/build-tools/19.0.1:$PATH"
 
-      pipe <<-CMD
-        export ANDROID_HOME=#{android_home_path} &&
-        export PATH=#{Dir.pwd}/bin:$PATH         &&
-        echo y | #{android_home_path}/tools/android --silent update sdk #{default_android_sdk_options}
-      CMD
+      run_interactive_cmd "ANDROID_HOME=#{android_home_path} PATH=#{Dir.pwd}/bin:$PATH #{android_home_path}/tools/android --silent update sdk #{default_android_sdk_options}"
 
       topic "Done installing SDK"
     end
   end
+
+  def run_interactive_cmd(command, options = {})
+    output = ""
+    IO.popen(command, "r+") do |io|
+      until io.eof?
+        buffer = io.gets
+
+        if buffer.match "14.7 The License Agreement, and your relationship with Google under the License Agreement, shall be governed"
+          io.puts "y"
+          io.puts "\n"
+        end
+
+        output << buffer
+        puts buffer
+      end
+    end
+
+    output
+  end
+
 
   def android_sdk_path
     "#{Dir.pwd}/#{ANDROID_SDK_PATH}"
